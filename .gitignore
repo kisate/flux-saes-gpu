@@ -13,3 +13,12 @@ wheels/
 dataset/
 
 .env
+
+*.npz
+**/*.npz
+*_cache/
+.dspy_cache/
+dataset/
+flux1-saes/
+*.jpeg
+*.png
