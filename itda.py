@@ -64,6 +64,7 @@ class ITDAOutput:
     indices: torch.Tensor
     x_reconstructed: torch.Tensor
     y_reconstructed: torch.Tensor
+    var_explained: torch.Tensor
     losses: torch.Tensor
     skip_y: torch.Tensor | None = None
 
@@ -174,12 +175,19 @@ class ITDA(nn.Module):
             losses = l2_loss / total_variance
         else:
             losses = (y_reconstructed - y).pow(2).sum(-1)
+        
+        correlation = ((y - y.mean(axis=0)) * (y_reconstructed - y_reconstructed.mean(axis=0))).mean(axis=0)
+        var_explained = torch.nan_to_num(torch.square(correlation) / (
+            torch.var(y, axis=0) * torch.var(y_reconstructed, axis=0)
+        )).mean()
+        
         return ITDAOutput(
             weights=weights,
             indices=indices,
             x_reconstructed=x_reconstructed,
             y_reconstructed=y_reconstructed,
             losses=losses,
+            var_explained=var_explained,
             skip_y=skip_y if self.config.skip_connection else None
         )
        

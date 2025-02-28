@@ -73,12 +73,11 @@ def save_itda_outputs(
         step: int,
         feature_acts: ScoredStorage,
         save_image_activations: bool,
+        images_dir: Path,
+        image_activations_dir: Path,
     ):
         image_max = 6.0
-        images_dir = Path("images_itda")
         images_dir.mkdir(parents=True, exist_ok=True)
-
-        image_activations_dir = Path("image_activations_itda")
         image_activations_dir.mkdir(parents=True, exist_ok=True)
 
 
