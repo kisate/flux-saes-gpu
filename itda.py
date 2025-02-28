@@ -50,6 +50,7 @@ class ITDAConfig:
     error_k: int = None
     skip_connection: bool = False
     preprocessing_steps: int = 1
+    normalize: bool = False
 
 
 
@@ -89,6 +90,12 @@ class ITDA(nn.Module):
             nn.Parameter(torch.zeros(config.d_model, dtype=dtype, device=device),
                          requires_grad=False) for _ in range(2)
         )
+
+        self.std_x, self.std_y = (
+            nn.Parameter(torch.ones(config.d_model, dtype=dtype, device=device),
+                         requires_grad=False) for _ in range(2)
+        )
+        
         self.weight = nn.Parameter(
             torch.empty((config.d_model, config.d_model),
                         dtype=dtype, device=device),
