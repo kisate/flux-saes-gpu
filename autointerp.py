@@ -154,8 +154,9 @@ def maxacts(feature_id: int, random_order=False):
         # Add score to the corresponding location in the grid
         grouped_rows[key][h, w] = score
  
+    grouped_rows = sorted(grouped_rows.items(), key=lambda x: x[1].max(), reverse=True)
     if random_order:
-        grouped_rows = sorted(grouped_rows.items(), key=lambda x: x[1].max(), reverse=True)
+        np.random.shuffle(grouped_rows)
     for idx, grid in grouped_rows:
         try:
             full_activations = np.load(image_activations_dir / f"{idx}.npz")

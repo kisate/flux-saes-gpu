@@ -51,6 +51,7 @@ class ITDAConfig:
     skip_connection: bool = False
     preprocessing_steps: int = 1
     normalize: bool = False
+    max_add: int | None = None
 
 
 
@@ -217,6 +218,9 @@ class ITDA(nn.Module):
         self.steps += 1
         out_0 = self(x, y)
         should_be_added = out_0.losses > self.config.loss_threshold
+        if self.config.max_add is not None:
+            sba = (out_0.losses * should_be_added).topk(self.config.max_add)[1]
+            should_be_added = sba[should_be_added[sba]]
         if self.config.add_error:
             if self.config.error_k is None:
                 added_x = x - out_0.x_reconstructed
