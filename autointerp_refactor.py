@@ -110,13 +110,14 @@ The image will have activations for the neuron highlighted in blue.
 You should judge whether the description of the neuron's pattern is accurate or not.
 Return a score between 0 and 1, where 1 means the description is accurate and 0 means it is not.
 Be very critical. The pattern should be literal and specific, and vague or general descriptions should be rated low.
+The activation pattern is {pattern}.
 """
         
         # Setup LiteLLM
         self.setup_litellm()
         
         # Concurrency control
-        self.semaphore = asyncio.Semaphore(5)
+        self.semaphore = asyncio.Semaphore(3)
 
     def setup_litellm(self):
         """Configure LiteLLM with caching settings"""
@@ -280,7 +281,7 @@ Be very critical. The pattern should be literal and specific, and vague or gener
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": self.judge_template},
+                    {"type": "text", "text": self.judge_template.format(pattern=pattern["common_pattern"])},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
@@ -288,9 +289,6 @@ Be very critical. The pattern should be literal and specific, and vague or gener
                 ],
             }
         ]
-
-        for p in pattern:
-            messages.append({"role": "user", "content": [{"type": "text", "text": p}]})
 
         response = await acompletion(
             model="openai/google/gemini-2.0-flash-001",
@@ -327,11 +325,16 @@ Be very critical. The pattern should be literal and specific, and vague or gener
 
         # Get images for the sampled features
         images_others = [
-            next(iter(self.maxacts(f, random_order=True))) for f in sampled_features
+            next(iter(self.maxacts(f, random_order=False))) for f in sampled_features
         ]
 
         # Generate descriptions for the images
-        pattern = self.generate_activation_descriptions(images_matching)
+        try:
+            pattern = self.generate_activation_descriptions(images_matching)
+            pattern = json.loads(pattern)
+        except Exception as e:
+            print(f"Failed to generate descriptions for feature {feature_id}: {e}")
+            return
 
         # Judge the descriptions
         labels = [1] * len(images_matching) + [0] * len(images_others)
@@ -345,7 +348,7 @@ Be very critical. The pattern should be literal and specific, and vague or gener
             for matching, score in zip(labels, scores)
         ) / len(scores)
 
-        return {"avg_score": avg_score, "pattern": json.loads(pattern)}
+        return {"avg_score": avg_score, "pattern": pattern}
 
     async def add_one_result(self, feature_id, feature_image_counts):
         """Process one feature and save results"""
@@ -424,7 +427,7 @@ if __name__ == "__main__":
     images_folder=f"images_{feature_type}"
     image_activations_folder=f"image_activations_{feature_type}"
     interps_dir=f"interps_{feature_type}"
-    latent_cache_path=Path(".latent_cache")
+    latent_cache_path=Path(".latent_cache_mlp")
     counts_path=f"image_counts_{feature_type}.npy"
 
     if feature_type == "sae":
@@ -453,11 +456,11 @@ if __name__ == "__main__":
         n_features=n_features[feature_type],
     )
 
-    do_counts = True
+    do_counts = False
 
     if do_counts:
         counts = auto_interp.calculate_all_feature_image_counts(n_threads=5)
     else:
         counts = np.load(counts_path)
 
-    # asyncio.run(auto_interp.process_features(counts))
+    asyncio.run(auto_interp.process_features(counts))
