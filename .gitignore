@@ -26,3 +26,9 @@ images_saes/*
 interps/*
 *.json
 nohup.out
+flux1-saes/*
+images_*/*
+image_*/*
+itda_*_steps_*/*
+latent_cache*/*
+double_l18_*/*

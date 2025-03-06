@@ -421,17 +421,17 @@ The activation pattern is {pattern}.
 # Example usage
 if __name__ == "__main__":
     # This would be imported/defined elsewhere in the real code
-    feature_type = "mlp" 
+    feature_type = "sae" 
 
     data_path=f"{feature_type}_data/feature_acts.db"
     images_folder=f"images_{feature_type}"
     image_activations_folder=f"image_activations_{feature_type}"
     interps_dir=f"interps_{feature_type}"
-    latent_cache_path=Path(".latent_cache_mlp")
+    latent_cache_path=Path(f".latent_cache_{feature_type}")
     counts_path=f"image_counts_{feature_type}.npy"
 
     if feature_type == "sae":
-        data_path = "flux1-saes/maxacts_double_l18_img"
+        data_path = "flux1-saes/maxacts_double_l18_img/feature_acts.db"
 
     thresholds = {
         "mlp": 1,
