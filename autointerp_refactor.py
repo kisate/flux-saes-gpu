@@ -23,6 +23,9 @@ from tqdm.auto import tqdm
 from diffusers import AutoencoderKL
 import torch
 
+import multiprocessing as mp
+from multiprocessing import Manager, Pool
+
 matplotlib.use("Agg")
 
 
@@ -377,51 +380,105 @@ The activation pattern is {pattern}.
         """Calculate the number of images for each feature"""
         return sum(1 for _ in self.maxacts(feature_id, only_counts=True))
 
-    async def calculate_feature_image_counts_async(self, feature_id, semaphore, pbar, results, save_lock):
-        """Calculate image counts with progress tracking"""
-        async with semaphore:
-            count = sum(1 for _ in self.maxacts(feature_id, only_counts=True))
-            results[feature_id] = count
-            pbar.update(1)
-            
-            # Save intermediate results every 500 items
-            async with save_lock:
-                if pbar.n % 500 == 0 and pbar.n > 0:
-                    tmp_counts = np.array([results.get(i, 0) for i in range(self.n_features)])
-                    np.save(self.counts_path, tmp_counts)
-                    pbar.set_description(f"Saved progress at {pbar.n}/{self.n_features}")
-            
-            return count
-
-    async def calculate_all_feature_image_counts_async(self, n_threads=5):
-        """Calculate the number of images for all features using async with progress bar"""
-        semaphore = asyncio.Semaphore(n_threads)
-        save_lock = asyncio.Lock()  # Lock for saving to prevent concurrent writes
-        results = {}  # Dictionary to store results as they complete
-        
-        with tqdm(total=self.n_features, desc="Calculating feature image counts") as pbar:
-            counts = await asyncio.gather(
-                *[self.calculate_feature_image_counts_async(i, semaphore, pbar, results, save_lock) 
-                for i in range(self.n_features)]
-            )
-        
-        return counts
-
-    def calculate_all_feature_image_counts(self, n_threads=5):
-        """Calculate the number of images for all features with progress tracking and periodic saves"""
-        counts = asyncio.run(self.calculate_all_feature_image_counts_async(n_threads))
-        counts = np.array(counts)
-
-        # Save the final counts to a file
-        np.save(self.counts_path, counts)
-        print(f"Saved final feature image counts to {self.counts_path}")
-        return counts
+    # MULTIPROCESSING IMPLEMENTATION
     
+    def calculate_all_feature_image_counts(self, n_processes=None, batch_size=10):
+        """
+        Calculate the number of images for all features using multiprocessing with progress bar
+        and batched processing to reduce lock contention
+        
+        Args:
+            n_processes: Number of processes to use. If None, uses CPU count.
+            batch_size: Number of features to process in a single batch before acquiring a lock
+        
+        Returns:
+            numpy.ndarray: Array of counts for each feature
+        """
+        # Set default number of processes if not specified
+        if n_processes is None:
+            n_processes = mp.cpu_count()
+        
+        # Create a Manager to handle shared objects across processes
+        with Manager() as manager:
+            # Create shared dictionary and lock
+            shared_dict = manager.dict()
+            save_lock = manager.Lock()
+            
+            # Create batches of feature IDs
+            feature_batches = []
+            for i in range(0, self.n_features, batch_size):
+                batch = list(range(i, min(i + batch_size, self.n_features)))
+                feature_batches.append(batch)
+            
+            # Create argument list for each batch
+            args_list = [
+                (batch, self, shared_dict, save_lock, self.counts_path, self.n_features, batch_size)
+                for batch in feature_batches
+            ]
+            
+            # Use a Pool to manage worker processes
+            with Pool(processes=n_processes) as pool:
+                # Process batches and collect results
+                all_results = []
+                
+                # Use imap_unordered to get results as they complete
+                # Wrap with tqdm for progress tracking
+                for batch_results in tqdm(
+                    pool.imap_unordered(calculate_feature_image_counts_batch, args_list),
+                    total=len(feature_batches),
+                    desc=f"Calculating feature image counts (using {n_processes} processes, batch size {batch_size})"
+                ):
+                    all_results.extend(batch_results)
+                    
+            # Convert results to numpy array
+            sorted_results = sorted(all_results, key=lambda x: x[0])  # Sort by feature_id
+            counts = np.array([count for _, count in sorted_results])
+            
+            # Save the final counts to a file
+            np.save(self.counts_path, counts)
+            print(f"Saved final feature image counts to {self.counts_path}")
+            
+            return counts
+
+
+# Function to be used by the process pool
+def calculate_feature_image_counts_batch(args):
+    """
+    Calculate image counts for a batch of features
+    
+    This function processes multiple features before acquiring a lock,
+    which reduces lock contention and improves performance.
+    """
+    feature_ids, instance, shared_dict, save_lock, counts_path, n_features, batch_size = args
+    
+    results = []
+    
+    # Process all features in the batch without acquiring a lock
+    for feature_id in feature_ids:
+        count = sum(1 for _ in instance.maxacts(feature_id, only_counts=True))
+        results.append((feature_id, count))
+    
+    # Acquire lock once for the entire batch
+    with save_lock:
+        # Update shared dictionary with all results at once
+        for feature_id, count in results:
+            shared_dict[feature_id] = count
+        
+        processed = len(shared_dict)
+        
+        # Save intermediate results every 500 items
+        if processed % 1000 < batch_size and processed > 0:
+            # Create a temporary array from the shared dictionary
+            tmp_counts = np.array([shared_dict.get(i, 0) for i in range(n_features)])
+            np.save(counts_path, tmp_counts)
+            print(f"Saved progress at {processed}/{n_features}")
+    
+    return results
 
 # Example usage
 if __name__ == "__main__":
     # This would be imported/defined elsewhere in the real code
-    feature_type = "sae" 
+    feature_type = "itda_new" 
 
     data_path=f"{feature_type}_data/feature_acts.db"
     images_folder=f"images_{feature_type}"
@@ -437,12 +494,14 @@ if __name__ == "__main__":
         "mlp": 1,
         "sae": 5,
         "itda": 5,
+        "itda_new": 5,
     }
 
     n_features = {
         "mlp": 12288,
         "sae": 2**16,
         "itda": 16000,
+        "itda_new": 50000,
     }
 
     auto_interp = AutoInterp(
@@ -456,10 +515,10 @@ if __name__ == "__main__":
         n_features=n_features[feature_type],
     )
 
-    do_counts = False
+    do_counts = True
 
     if do_counts:
-        counts = auto_interp.calculate_all_feature_image_counts(n_threads=5)
+        counts = auto_interp.calculate_all_feature_image_counts(n_processes=64, batch_size=64)
     else:
         counts = np.load(counts_path)
 
